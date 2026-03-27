@@ -1,0 +1,80 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ------------------------------------------------------------------------
+    // UTILITY FUNCTIONS
+    // ------------------------------------------------------------------------
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Get the user's role from the 'users' collection
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() == 'admin';
+    }
+
+    function isAssetController() {
+      return isAuthenticated() && getUserRole() == 'asset_controller';
+    }
+
+    function isForeman() {
+      return isAuthenticated() && getUserRole() == 'foreman';
+    }
+
+    // ------------------------------------------------------------------------
+    // COLLECTIONS
+    // ------------------------------------------------------------------------
+
+    // Tools Collection
+    match /tools/{toolId} {
+      // Anyone logged in can see the tools
+      allow read: if isAuthenticated();
+      // Foremen can update a tool's status (e.g. from 'available' to 'checked_out')
+      allow update: if isAuthenticated(); 
+      // Only Admins and Asset Controllers can add or delete tools 
+      allow create, delete: if isAdmin() || isAssetController();
+    }
+
+    // Checkouts Collection (Movements)
+    match /checkouts/{checkoutId} {
+      allow read: if isAuthenticated();
+      // Anyone logged in can create a checkout (Foreman assigning to self, Admin assigning)
+      allow create: if isAuthenticated();
+      // Admins/Asset Controllers can manage Check-ins (updates) and deletes
+      allow update, delete: if isAdmin() || isAssetController();
+    }
+
+    // Repairs Collection
+    match /repairs/{repairId} {
+      allow read: if isAuthenticated();
+      // Foremen can log new repairs
+      allow create: if isAuthenticated();
+      // Only Admins/Asset Controllers can update repair statuses or delete them
+      allow update, delete: if isAdmin() || isAssetController();
+    }
+
+    // Users Collection (Team Management)
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      // Only Admins can create, edit, or delete team members
+      // The update includes our backend hack for updating passwords safely
+      allow write: if isAdmin();
+    }
+    
+    // Sites Collection
+    match /sites/{siteId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAssetController();
+    }
+
+    // Config Collection (Categories dropdown)
+    match /config/{document=**} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin() || isAssetController();
+    }
+  }
+}

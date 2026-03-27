@@ -4,9 +4,14 @@ import {
   Bell, LogOut, Search, Plus, X, Check, ChevronRight,
   AlertCircle, CheckCircle, Shield, MapPin, DollarSign,
   Camera, ChevronDown, ChevronUp, FileText, Download, Edit2,
-  QrCode, List, Settings, Printer, Tag
+  QrCode, List, Settings, Printer, Tag, Users
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
+import { useAuth } from "./contexts/AuthContext";
+import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { auth } from "./firebase";
+import { useLiveTracking } from "./hooks/useLiveTracking";
+import jsQR from "jsqr";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
@@ -44,50 +49,9 @@ const P = {
 // ─────────────────────────────────────────────────────────────────────────────
 // MOCK DATA
 // ─────────────────────────────────────────────────────────────────────────────
-const INIT_USERS = [
-  { id: "u1", name: "Damien Kasselman", role: "admin",            initials: "DK" },
-  { id: "u2", name: "Levona",           role: "asset_controller", initials: "LV" },
-  { id: "u3", name: "Ruan",             role: "foreman",          initials: "RU" },
-  { id: "u4", name: "Carlos",           role: "foreman",          initials: "CA" },
-  { id: "u5", name: "Ashwin",           role: "foreman",          initials: "AS" },
-  { id: "u6", name: "Thabo",            role: "foreman",          initials: "TB" },
-];
-const INIT_SITES = [
-  { id: "s1", name: "Constantia Residence",    address: "Constantia, Cape Town" },
-  { id: "s2", name: "Green Point Development", address: "Green Point, Cape Town" },
-  { id: "s3", name: "Brackenfell School",      address: "Brackenfell, Cape Town" },
-  { id: "s4", name: "Bellville Industrial",    address: "Bellville, Cape Town" },
-  { id: "s5", name: "Camps Bay Villa",         address: "Camps Bay, Cape Town" },
-];
-const INIT_CATS = ["Power Tools","Hand Tools","Measuring","Safety","Machinery","Landscaping","Paving","Electrical"];
-const INIT_TOOLS = [
-  { id:"T001", name:"Bosch Rotary Hammer",        category:"Power Tools", brand:"Bosch",         model:"GBH 2-26 DFR",  serial:"BSH-2024-001", cost:4200,  purchaseDate:"2023-03-15", status:"checked_out", condition:"good",  photo:null },
-  { id:"T002", name:"DeWalt Circular Saw",         category:"Power Tools", brand:"DeWalt",        model:"DCS570P2",      serial:"DWT-2023-045", cost:3800,  purchaseDate:"2023-01-20", status:"available",   condition:"good",  photo:null },
-  { id:"T003", name:"Plate Compactor",             category:"Machinery",   brand:"Wacker Neuson", model:"WP1540",        serial:"WK-2022-012",  cost:18500, purchaseDate:"2022-06-10", status:"in_repair",   condition:"poor",  photo:null },
-  { id:"T004", name:"Leica Laser Level",           category:"Measuring",   brand:"Leica",         model:"Lino L2",       serial:"LC-2024-003",  cost:6200,  purchaseDate:"2024-01-05", status:"checked_out", condition:"good",  photo:null },
-  { id:"T005", name:"Makita Angle Grinder 230mm",  category:"Power Tools", brand:"Makita",        model:"GA9020",        serial:"MK-2023-088",  cost:1850,  purchaseDate:"2023-07-22", status:"available",   condition:"fair",  photo:null },
-  { id:"T006", name:"Extension Cord 50m",          category:"Electrical",  brand:"Generic",       model:null,            serial:null,           cost:450,   purchaseDate:"2023-09-01", status:"checked_out", condition:"fair",  photo:null },
-  { id:"T007", name:"Belle Concrete Mixer 140L",   category:"Machinery",   brand:"Belle",         model:"Mini 140",      serial:"BL-2021-007",  cost:12000, purchaseDate:"2021-04-18", status:"available",   condition:"fair",  photo:null },
-  { id:"T008", name:"Husqvarna Paving Saw",        category:"Paving",      brand:"Husqvarna",     model:"TS 400 F",      serial:"HS-2022-034",  cost:28500, purchaseDate:"2022-11-30", status:"available",   condition:"good",  photo:null },
-  { id:"T009", name:"Stanley Tape Measure 50m",    category:"Measuring",   brand:"Stanley",       model:"FatMax",        serial:null,           cost:280,   purchaseDate:"2024-02-14", status:"available",   condition:"good",  photo:null },
-  { id:"T010", name:"Bosch SDS Drill 18V",         category:"Power Tools", brand:"Bosch",         model:"GBH 18V-26",    serial:"BSH-2024-022", cost:5600,  purchaseDate:"2024-03-01", status:"checked_out", condition:"good",  photo:null },
-  { id:"T011", name:"Scaffolding Frame Set",       category:"Safety",      brand:"Almax",         model:"Heavy Duty",    serial:"AM-2020-005",  cost:22000, purchaseDate:"2020-08-15", status:"available",   condition:"fair",  photo:null },
-  { id:"T012", name:"Rubi Brick Splitter TX-1100", category:"Paving",      brand:"Rubi",          model:"TX-1100",       serial:"RB-2023-011",  cost:9400,  purchaseDate:"2023-05-10", status:"in_repair",   condition:"poor",  photo:null },
-  { id:"T013", name:"Ryobi Jigsaw",               category:"Power Tools", brand:"Ryobi",         model:"RJS720-G",      serial:"RYB-2024-009", cost:1100,  purchaseDate:"2024-01-15", status:"available",   condition:"good",  photo:null },
-  { id:"T014", name:"DeWalt Cordless Screwdriver", category:"Power Tools", brand:"DeWalt",        model:"DCF885",        serial:"DWT-2024-031", cost:2200,  purchaseDate:"2024-02-20", status:"available",   condition:"good",  photo:null },
-  { id:"T015", name:"Gorilla Wheelbarrow",         category:"Landscaping", brand:"Gorilla",       model:"GW100",         serial:null,           cost:680,   purchaseDate:"2023-10-05", status:"checked_out", condition:"fair",  photo:null },
-];
-const INIT_CHECKOUTS = [
-  { id:"co1", toolId:"T001", foremanId:"u3", siteId:"s1", checkoutDate:"2026-03-10", dueDate:"2026-03-14", returnDate:null, notes:"For pergola drilling" },
-  { id:"co2", toolId:"T004", foremanId:"u4", siteId:"s2", checkoutDate:"2026-03-12", dueDate:"2026-03-16", returnDate:null, notes:"" },
-  { id:"co3", toolId:"T006", foremanId:"u5", siteId:"s3", checkoutDate:"2026-03-08", dueDate:"2026-03-13", returnDate:null, notes:"" },
-  { id:"co4", toolId:"T010", foremanId:"u3", siteId:"s4", checkoutDate:"2026-03-14", dueDate:"2026-03-21", returnDate:null, notes:"Artificial grass install" },
-  { id:"co5", toolId:"T015", foremanId:"u6", siteId:"s5", checkoutDate:"2026-03-15", dueDate:"2026-03-18", returnDate:null, notes:"" },
-];
-const INIT_REPAIRS = [
-  { id:"r1", toolId:"T003", issue:"Engine not starting — carburetor fault",  reportedBy:"u3", assignedTo:"Authorized Service Centre", estimatedReturn:"2026-03-25", status:"in_progress", estimatedCost:1800, actualCost:null, notes:"" },
-  { id:"r2", toolId:"T012", issue:"Blade cracked — needs replacement",        reportedBy:"u4", assignedTo:"Levona",                    estimatedReturn:"2026-03-17", status:"pending",     estimatedCost:650,  actualCost:null, notes:"" },
-];
+// ─────────────────────────────────────────────────────────────────────────────
+// MOCK DATA MOVED TO useLiveTracking.js
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
@@ -113,6 +77,7 @@ const ROLE_CFG = {
   admin:            { label:"Administrator",    color:P.orange },
   asset_controller: { label:"Asset Controller", color:P.green  },
   foreman:          { label:"Foreman",          color:P.blue   },
+  unauthorized:     { label:"Pending Role",     color:P.muted  },
 };
 const REPAIR_STATUS_CFG = {
   pending:     { label:"Pending",     color:P.yellow },
@@ -367,27 +332,99 @@ function QRCodeDisplay({ toolId, size = 160 }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QR SCANNER (camera — reads DKTP-XXXX codes)
+// QR SCANNER (Raw WebRTC + jsQR) - Zero-latency native camera engine
 // ─────────────────────────────────────────────────────────────────────────────
 function QRScanner({ onScan, onClose, title = "Scan QR Code" }) {
-  // Camera access is blocked in the prototype sandbox (claude.ai iframe).
-  // In the real PWA installed on a phone, this component opens the device camera,
-  // reads the DKTP-XXXX sticker, and resolves automatically.
-  // For this prototype, use the manual list to test the flow.
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const requestRef = useRef(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    let stream = null;
+    let mounted = true;
+
+    async function startCamera() {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+        if (!mounted || !videoRef.current) return;
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", true);
+        await videoRef.current.play();
+        scanFrame();
+      } catch (err) {
+        if (mounted) setError("Camera access denied or unavailable: " + err.message);
+      }
+    }
+
+    function scanFrame() {
+      if (!mounted || !videoRef.current || !canvasRef.current) return;
+      if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+        const canvas = canvasRef.current;
+        const video = videoRef.current;
+        
+        // Define optimal processing size to obliterate high-res noise 
+        const size = 400;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        
+        // Center crop the video feed to match the exact middle of the screen (where the UI target is)
+        const vW = video.videoWidth;
+        const vH = video.videoHeight;
+        const minDim = Math.min(vW, vH);
+        const sx = (vW - minDim) / 2;
+        const sy = (vH - minDim) / 2;
+        
+        ctx.drawImage(video, sx, sy, minDim, minDim, 0, 0, size, size);
+        const imageData = ctx.getImageData(0, 0, size, size);
+        
+        // Force jsQR to aggressively hunt for inverted matrix markers
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+        if (code && code.data) {
+          onScan(code.data.replace("DKTP-", "").trim());
+          return; // Terminate scan loop on success
+        }
+      }
+      requestRef.current = requestAnimationFrame(scanFrame);
+    }
+
+    startCamera();
+
+    return () => {
+      mounted = false;
+      if (requestRef.current) cancelAnimationFrame(requestRef.current);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+    };
+  }, [onScan]);
+
   return (
     <Modal title={title} onClose={onClose}>
-      <div style={{ textAlign:"center", padding:"24px 16px" }}>
-        <div style={{ width:60, height:60, background:P.elevated, borderRadius:16, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 14px" }}>
-          <Camera size={28} color={P.orange} />
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:13, color:P.sub, marginBottom:16, padding:"0 20px" }}>
+          Point your camera at a equipment label or generic QR code.
         </div>
-        <div style={{ fontSize:14, fontWeight:600, color:P.text, marginBottom:8 }}>Camera scan ready for real device</div>
-        <div style={{ fontSize:12, color:P.sub, lineHeight:1.6, marginBottom:18 }}>
-          QR scanning works when this app is installed as a PWA on your phone.
-          The camera opens, reads the <span style={{ color:P.orange, fontFamily:"monospace" }}>DKTP-</span> sticker, and auto-selects the tool instantly.
-          <br/><br/>
-          In this browser prototype, use the <strong style={{ color:P.text }}>Manual List</strong> tab to test check-in/out flows.
+        <div style={{ position:"relative", width:"100%", maxWidth:400, margin:"0 auto", minHeight: 300, borderRadius:12, overflow:"hidden", border:`1px solid ${P.border}`, background:"#000" }}>
+          {error ? (
+            <div style={{ color: P.red, padding: 20 }}>{error}</div>
+          ) : (
+            <>
+              <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <canvas ref={canvasRef} style={{ display: "none" }} />
+              {/* Hardware-style Viewfinder Overlay */}
+              <div style={{ position:"absolute", top:"20%", bottom:"20%", left:"15%", right:"15%", border:`3px solid ${P.orange}`, borderRadius:12, pointerEvents:"none", boxShadow:"0 0 0 4000px rgba(0,0,0,0.6)" }}></div>
+              <div style={{ position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+                <div style={{ width:"40%", height:"2px", background:`${P.orange}aa`, opacity:0.5, animation:"scanline 2s infinite linear" }} />
+              </div>
+              <style>{`@keyframes scanline { 0% { transform: translateY(-100px); } 50% { transform: translateY(100px); opacity:1; } 100% { transform: translateY(-100px); } }`}</style>
+            </>
+          )}
         </div>
-        <Btn full variant="secondary" onClick={onClose}>Switch to Manual List</Btn>
+        <div style={{ padding:"20px" }}>
+          <Btn full variant="secondary" onClick={onClose}>Cancel Scan</Btn>
+        </div>
       </div>
     </Modal>
   );
@@ -515,7 +552,7 @@ function printQRLabels(filteredTools) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EXPORT CSV — downloads CSV openable in Excel
+// EXPORT EXCEL — native XLSX generator
 // ─────────────────────────────────────────────────────────────────────────────
 function exportCSV(filteredTools) {
   const esc = function(v){ return '"' + String(v||"").replace(/"/g,'""') + '"'; };
@@ -529,13 +566,22 @@ function exportCSV(filteredTools) {
     ];
   });
   const csv = [header, ...rows].map(function(r){ return r.map(esc).join(","); }).join("\n");
-  const blob = new Blob([csv], {type:"text/csv"});
+  
+  const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+  const blob = new Blob([bom, csv], { type: "text/csv;charset=utf-8" });
+  
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  
+  a.href = url;
   a.download = "DK-Tool-Register.csv";
   document.body.appendChild(a);
   a.click();
-  document.body.removeChild(a);
+  
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 300);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -668,12 +714,12 @@ const Btn = ({ children, onClick, variant="primary", small, full, disabled }) =>
   );
 };
 
-const Field = ({ label, value, onChange, placeholder, type="text", required }) => (
+const Field = ({ label, value, onChange, placeholder, type="text", required, disabled }) => (
   <div style={{ marginBottom:14 }}>
     {label && <div style={{ fontSize:12, color:P.sub, marginBottom:5, fontWeight:500 }}>{label}{required&&" *"}</div>}
-    <input type={type} value={value||""} onChange={e=>onChange(e.target.value)} placeholder={placeholder||""} style={{
+    <input type={type} value={value||""} onChange={e=>onChange(e.target.value)} disabled={disabled} placeholder={placeholder||""} style={{
       width:"100%", background:P.elevated, border:`1px solid ${P.border}`, borderRadius:10,
-      padding:"10px 12px", color:P.text, fontSize:14,
+      padding:"10px 12px", color:disabled?P.muted:P.text, fontSize:14, opacity:disabled?0.6:1, cursor:disabled?"not-allowed":"text"
     }} />
   </div>
 );
@@ -765,7 +811,26 @@ const SectionLabel = ({ children }) => (
 // ─────────────────────────────────────────────────────────────────────────────
 // LOGIN
 // ─────────────────────────────────────────────────────────────────────────────
-function LoginScreen({ onLogin }) {
+function LoginScreen() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async () => {
+    if (!email || !password) return setError("Please enter username and password.");
+    setLoading(true); setError("");
+    
+    const authEmail = email.includes("@") ? email : `${email}@dkpaving.app`;
+    try {
+      await signInWithEmailAndPassword(auth, authEmail, password);
+    } catch (err) {
+      setError("Failed to sign in. Please check your credentials.");
+      console.error(err);
+    }
+    setLoading(false);
+  };
+
   return (
     <div style={{ background:P.bg, minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"24px 20px" }}>
       <div style={{ marginBottom:36, textAlign:"center" }}>
@@ -776,25 +841,11 @@ function LoginScreen({ onLogin }) {
         <div style={{ fontSize:12, color:P.muted, marginTop:4 }}>DK Turf & Paving · Asset Management</div>
       </div>
       <div style={{ width:"100%", maxWidth:380 }}>
-        <SectionLabel>Select your profile to continue</SectionLabel>
-        {INIT_USERS.map(u => (
-          <button key={u.id} onClick={()=>onLogin(u)} className="tap" style={{
-            width:"100%", background:P.surface, border:`1px solid ${P.border}`,
-            borderRadius:14, padding:"13px 16px", marginBottom:9,
-            display:"flex", alignItems:"center", gap:14, cursor:"pointer", textAlign:"left",
-          }}>
-            <div style={{ width:42, height:42, borderRadius:12, background:ROLE_CFG[u.role].color+"22", border:`1px solid ${ROLE_CFG[u.role].color}44`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-              <span style={{ fontWeight:800, fontSize:12, color:ROLE_CFG[u.role].color }}>{u.initials}</span>
-            </div>
-            <div style={{ flex:1 }}>
-              <div style={{ fontSize:14, fontWeight:600, color:P.text }}>{u.name}</div>
-              <div style={{ fontSize:12, color:P.sub }}>{ROLE_CFG[u.role].label}</div>
-            </div>
-            <ChevronRight size={15} color={P.muted} />
-          </button>
-        ))}
+        {error && <div style={{ background:P.red+"22", border:`1px solid ${P.red}`, borderRadius:10, padding:"10px 12px", color:P.red, fontSize:13, marginBottom:16 }}>{error}</div>}
+        <Field label="Username or Email" value={email} onChange={setEmail} type="text" placeholder="e.g. johndoe" required />
+        <Field label="Password" value={password} onChange={setPassword} type="password" placeholder="••••••••" required />
+        <Btn full onClick={handleLogin} disabled={loading}>{loading ? "Signing in..." : "Sign In"}</Btn>
       </div>
-      <div style={{ marginTop:22, fontSize:11, color:P.muted, textAlign:"center" }}>Prototype — Firebase auth replaces this in production</div>
     </div>
   );
 }
@@ -832,14 +883,20 @@ function TopBar({ user, notifCount, onNotifClick, onLogout }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // BOTTOM NAV
 // ─────────────────────────────────────────────────────────────────────────────
-function BottomNav({ active, setActive, alertCount }) {
+function BottomNav({ active, setActive, alertCount, isAdmin }) {
+  const { canSeeReports } = useAuth();
   const tabs = [
     { id:"dashboard",  Icon:Home,        label:"Home"    },
     { id:"tools",      Icon:Package,     label:"Tools"   },
     { id:"movements",  Icon:ArrowUpDown, label:"Move"    },
     { id:"repairs",    Icon:Wrench,      label:"Repairs" },
-    { id:"reports",    Icon:BarChart3,   label:"Reports" },
   ];
+  if (canSeeReports) {
+    tabs.push({ id:"reports",    Icon:BarChart3,   label:"Reports" });
+  }
+  if (isAdmin) {
+    tabs.push({ id:"team", Icon:Users, label:"Team" });
+  }
   return (
     <div style={{
       position:"fixed", bottom:0, left:"50%", transform:"translateX(-50%)",
@@ -870,6 +927,7 @@ function BottomNav({ active, setActive, alertCount }) {
 // DASHBOARD — stat cards navigate on tap
 // ─────────────────────────────────────────────────────────────────────────────
 function Dashboard({ tools, checkouts, repairs, sites, users, onNavigate }) {
+  const { canSeeFinancials } = useAuth();
   const available  = tools.filter(t=>t.status==="available").length;
   const checkedOut = tools.filter(t=>t.status==="checked_out").length;
   const inRepair   = tools.filter(t=>t.status==="in_repair").length;
@@ -916,15 +974,17 @@ function Dashboard({ tools, checkouts, repairs, sites, users, onNavigate }) {
         ))}
       </div>
 
-      <div style={{ background:`linear-gradient(135deg,#1a1d27,#252a3a)`, borderRadius:14, padding:"15px 18px", border:`1px solid ${P.border}`, marginBottom:18, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-        <div>
-          <div style={{ fontSize:11, color:P.sub, marginBottom:4, fontWeight:500 }}>Total Asset Value</div>
-          <div className="syne" style={{ fontSize:22, fontWeight:800, color:P.text }}>{currency(totalValue)}</div>
+      {canSeeFinancials && (
+        <div style={{ background:`linear-gradient(135deg,#1a1d27,#252a3a)`, borderRadius:14, padding:"15px 18px", border:`1px solid ${P.border}`, marginBottom:18, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+          <div>
+            <div style={{ fontSize:11, color:P.sub, marginBottom:4, fontWeight:500 }}>Total Asset Value</div>
+            <div className="syne" style={{ fontSize:22, fontWeight:800, color:P.text }}>{currency(totalValue)}</div>
+          </div>
+          <div style={{ background:P.orange+"18", borderRadius:12, padding:11 }}>
+            <DollarSign size={20} color={P.orange} />
+          </div>
         </div>
-        <div style={{ background:P.orange+"18", borderRadius:12, padding:11 }}>
-          <DollarSign size={20} color={P.orange} />
-        </div>
-      </div>
+      )}
 
       {overdueOuts.length > 0 && (
         <div style={{ marginBottom:16 }}>
@@ -977,7 +1037,8 @@ function Dashboard({ tools, checkouts, repairs, sites, users, onNavigate }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TOOLS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
-function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, onEdit, initialStatusFilter, categories, onManageCategories }) {
+function ToolsScreen({ tools, checkouts, repairs, sites, users, onAdd, onEdit, initialStatusFilter, categories, onManageCategories }) {
+  const { canAddTool, canEditTool, canSeeFinancials, canManageSystem } = useAuth();
   const [search,       setSearch]       = useState("");
   const [catFilter,    setCatFilter]    = useState("All");
   const [statusFilter, setStatusFilter] = useState(initialStatusFilter || "All");
@@ -1001,7 +1062,7 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, 
             padding:"9px 12px 9px 32px", color:P.text, fontSize:13,
           }} />
         </div>
-        {canEdit && (
+        {canAddTool && (
           <button onClick={onAdd} className="tap" style={{ background:P.orange, border:"none", borderRadius:10, padding:"9px 13px", cursor:"pointer", display:"flex", alignItems:"center", gap:5 }}>
             <Plus size={15} color="#000" />
             <span style={{ fontSize:13, fontWeight:700, color:"#000" }}>Add</span>
@@ -1027,11 +1088,13 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, 
             color:catFilter===c?P.blue:P.muted, fontSize:11, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0,
           }}>{c}</button>
         ))}
-        <button onClick={onManageCategories} style={{
-          padding:"5px 11px", borderRadius:20, border:`1px solid ${P.border}`,
-          background:"transparent", color:P.muted, fontSize:11, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0,
-          display:"flex", alignItems:"center", gap:4,
-        }}><Settings size={11}/> Manage</button>
+        {canManageSystem && (
+          <button onClick={onManageCategories} style={{
+            padding:"5px 11px", borderRadius:20, border:`1px solid ${P.border}`,
+            background:"transparent", color:P.muted, fontSize:11, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0,
+            display:"flex", alignItems:"center", gap:4,
+          }}><Settings size={11}/> Manage</button>
+        )}
       </div>
 
       {/* Export row */}
@@ -1086,9 +1149,8 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, 
                   {co && site && <div style={{ fontSize:11, color:P.orange, marginTop:4 }}>📍 {foreman?.name} → {site.name}</div>}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5, flexShrink:0 }}>
-                  <Badge {...STATUS_CFG[t.status]} />
                   <Badge label={COND_CFG[t.condition].label} color={COND_CFG[t.condition].color} />
-                  <div style={{ fontSize:11, color:P.muted }}>{currency(t.cost)}</div>
+                  {canSeeFinancials && <div style={{ fontSize:11, color:P.muted }}>{currency(t.cost)}</div>}
                 </div>
               </div>
             </button>
@@ -1099,7 +1161,7 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, 
 
       {detail && (
         <ToolDetailModal
-          tool={detail} checkouts={checkouts} repairs={repairs} sites={sites} users={users} canEdit={canEdit}
+          tool={detail} checkouts={checkouts} repairs={repairs} sites={sites} users={users} canEdit={canEditTool}
           onClose={()=>setDetail(null)} onEdit={()=>{ onEdit(detail); setDetail(null); }}
         />
       )}
@@ -1108,6 +1170,7 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, canEdit, onAdd, 
 }
 
 function ToolDetailModal({ tool, checkouts, repairs, sites, users, canEdit, onClose, onEdit }) {
+  const { canSeeFinancials } = useAuth();
   const co     = checkouts.find(c=>c.toolId===tool.id&&!c.returnDate);
   const repair = repairs.find(r=>r.toolId===tool.id&&r.status!=="complete");
   const foreman= co ? users.find(u=>u.id===co.foremanId) : null;
@@ -1151,8 +1214,10 @@ function ToolDetailModal({ tool, checkouts, repairs, sites, users, canEdit, onCl
           ["Brand",      tool.brand||"—"],
           ["Model",      tool.model||"—"],
           ["Serial No.", tool.serial||"—"],
-          ["Cost",       currency(tool.cost)],
-          ["Purchased",  fmt(tool.purchaseDate)],
+          ...(canSeeFinancials ? [
+            ["Cost",       currency(tool.cost)],
+            ["Purchased",  fmt(tool.purchaseDate)]
+          ] : [])
         ].map(([lbl, val]) => (
           <div key={lbl} style={{ background:P.elevated, borderRadius:10, padding:"9px 11px" }}>
             <div style={{ fontSize:10, color:P.muted, marginBottom:4 }}>{lbl}</div>
@@ -1209,6 +1274,7 @@ function ToolDetailModal({ tool, checkouts, repairs, sites, users, canEdit, onCl
 // TOOL FORM — with image capture
 // ─────────────────────────────────────────────────────────────────────────────
 function ToolFormModal({ tool, onSave, onDelete, onClose, categories }) {
+  const { canDeleteTool } = useAuth();
   const isNew     = !tool;
   const fileRef   = useRef(null);
   const [form, setForm] = useState(tool ? {...tool} : {
@@ -1275,7 +1341,7 @@ function ToolFormModal({ tool, onSave, onDelete, onClose, categories }) {
       )}
 
       <div style={{ display:"flex", gap:9, marginTop:4, justifyContent:"flex-end" }}>
-        {!isNew && <Btn variant="danger" small onClick={()=>{ if(window.confirm("Delete this tool?")) onDelete(tool.id); }}>Delete</Btn>}
+        {!isNew && canDeleteTool && <Btn variant="danger" small onClick={()=>{ if(window.confirm("Delete this tool?")) onDelete(tool.id); }}>Delete</Btn>}
         <Btn variant="secondary" small onClick={onClose}>Cancel</Btn>
         <Btn small onClick={save}>{isNew?"Add Tool":"Save Changes"}</Btn>
       </div>
@@ -1284,10 +1350,77 @@ function ToolFormModal({ tool, onSave, onDelete, onClose, categories }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MANAGE SITES MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+function ManageSitesModal({ sites, onSave, onDelete, onClose }) {
+  const [newSiteName, setNewSiteName] = useState("");
+  const [newSiteAddr, setNewSiteAddr] = useState("");
+  const [editId, setEditId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editAddr, setEditAddr] = useState("");
+
+  const handleAdd = () => {
+    if (!newSiteName.trim()) return;
+    onSave({ name: newSiteName.trim(), address: newSiteAddr.trim() });
+    setNewSiteName("");
+    setNewSiteAddr("");
+  };
+
+  const handleSaveEdit = (id) => {
+    if (!editName.trim()) return;
+    onSave({ id, name: editName.trim(), address: editAddr.trim() });
+    setEditId(null);
+  };
+
+  return (
+    <Modal title="Manage Sites" onClose={onClose}>
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+        <div style={{ background:P.surface, padding:14, borderRadius:12, border:`1px solid ${P.border}` }}>
+          <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Add New Site</div>
+          <Field label="Site Name" value={newSiteName} onChange={setNewSiteName} placeholder="e.g. Constantia Residence" />
+          <Field label="Address (Optional)" value={newSiteAddr} onChange={setNewSiteAddr} placeholder="e.g. 12 Main Rd" />
+          <Btn small onClick={handleAdd} disabled={!newSiteName.trim()}>Add Site</Btn>
+        </div>
+
+        <div>
+          {sites.map(s => (
+            <div key={s.id} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${P.border}` }}>
+              {editId === s.id ? (
+                <div style={{ flex:1, display:"flex", flexDirection:"column", gap:8 }}>
+                  <input className="input-field" value={editName} onChange={e=>setEditName(e.target.value)} />
+                  <input className="input-field" value={editAddr} onChange={e=>setEditAddr(e.target.value)} placeholder="Address" />
+                  <div style={{ display:"flex", gap:8 }}>
+                    <Btn small variant="secondary" onClick={()=>setEditId(null)}>Cancel</Btn>
+                    <Btn small onClick={()=>handleSaveEdit(s.id)}>Save</Btn>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <div style={{ fontSize:14, fontWeight:600, color:P.text }}>{s.name}</div>
+                    {s.address && <div style={{ fontSize:12, color:P.muted }}>{s.address}</div>}
+                  </div>
+                  <div style={{ display:"flex", gap:6 }}>
+                    <button className="tap" onClick={()=>{setEditId(s.id); setEditName(s.name); setEditAddr(s.address||"");}} style={{ background:P.border, width:28, height:28, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center" }}><Edit2 size={14} color={P.text}/></button>
+                    <button className="tap" onClick={()=>onDelete(s.id)} style={{ background:P.red+"22", width:28, height:28, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center" }}><X size={14} color={P.red}/></button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+          {sites.length === 0 && <div style={{ fontSize:13, color:P.muted, textAlign:"center", padding:20 }}>No sites added yet.</div>}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MOVEMENTS — QR scan + manual with search
 // ─────────────────────────────────────────────────────────────────────────────
-function MovementsScreen({ tools, checkouts, setCheckouts, setTools, sites, users, canEdit }) {
-  const [mode,       setMode]       = useState("out");       // out | in
+function MovementsScreen({ tools, checkouts, onCheckout, onCheckin, sites, users, onManageSites }) {
+  const { canCheckOut, canCheckIn, canManageSystem } = useAuth();
+  const [mode,       setMode]       = useState(canCheckOut ? "out" : "in");       // out | in
   const [inputMode,  setInputMode]  = useState("scan");      // scan | manual
   const [selected,   setSelected]   = useState([]);
   const [step,       setStep]       = useState(1);
@@ -1331,20 +1464,15 @@ function MovementsScreen({ tools, checkouts, setCheckouts, setTools, sites, user
     }
   };
 
-  const doCheckout = () => {
+  const doCheckout = async () => {
     if (!assignment.foremanId || !assignment.siteId || !assignment.dueDate) { alert("Fill in all required fields"); return; }
-    const today = new Date().toISOString().split("T")[0];
-    const newCOs = selected.map(toolId => ({ id:uid(), toolId, ...assignment, checkoutDate:today, returnDate:null }));
-    setCheckouts(prev => [...prev, ...newCOs]);
-    setTools(prev => prev.map(t => selected.includes(t.id) ? {...t, status:"checked_out"} : t));
+    await onCheckout(selected, assignment);
     switchMode("out");
     setFlash("checkout"); setTimeout(()=>setFlash(null), 3500);
   };
 
-  const doCheckin = () => {
-    const toolIds = selected.map(coId => checkouts.find(c=>c.id===coId)?.toolId).filter(Boolean);
-    setCheckouts(prev => prev.map(c => selected.includes(c.id) ? {...c, returnDate:new Date().toISOString().split("T")[0]} : c));
-    setTools(prev => prev.map(t => toolIds.includes(t.id) ? {...t, status:"available"} : t));
+  const doCheckin = async () => {
+    await onCheckin(selected);
     setSelected([]);
     setFlash("checkin"); setTimeout(()=>setFlash(null), 3500);
   };
@@ -1356,25 +1484,31 @@ function MovementsScreen({ tools, checkouts, setCheckouts, setTools, sites, user
     !scanSearch || co.tool?.name.toLowerCase().includes(scanSearch.toLowerCase()) || co.foreman?.name.toLowerCase().includes(scanSearch.toLowerCase())
   );
 
-  if (!canEdit) return (
+  if (!canCheckOut && !canCheckIn) return (
     <div style={{ padding:32, textAlign:"center" }}>
       <Shield size={38} color={P.muted} style={{ marginBottom:12 }} />
       <div style={{ fontSize:14, color:P.sub }}>Your role doesn't have permission to manage movements.</div>
     </div>
   );
 
+  const availableModes = [];
+  if (canCheckOut) availableModes.push(["out","Check Out →"]);
+  if (canCheckIn) availableModes.push(["in","← Check In"]);
+
   return (
     <div style={{ padding:16 }}>
       {/* Mode toggle */}
-      <div style={{ display:"flex", background:P.surface, borderRadius:12, padding:4, marginBottom:14, border:`1px solid ${P.border}` }}>
-        {[["out","Check Out →"],["in","← Check In"]].map(([m,lbl])=>(
-          <button key={m} onClick={()=>switchMode(m)} className="tap" style={{
-            flex:1, padding:"10px", borderRadius:9, border:"none",
-            background:mode===m?P.orange:"transparent",
-            color:mode===m?"#000":P.sub, fontWeight:700, fontSize:13, cursor:"pointer",
-          }}>{lbl}</button>
-        ))}
-      </div>
+      {availableModes.length > 1 && (
+        <div style={{ display:"flex", background:P.surface, borderRadius:12, padding:4, marginBottom:14, border:`1px solid ${P.border}` }}>
+          {availableModes.map(([m,lbl])=>(
+            <button key={m} onClick={()=>switchMode(m)} className="tap" style={{
+              flex:1, padding:"10px", borderRadius:9, border:"none",
+              background:mode===m?P.orange:"transparent",
+              color:mode===m?"#000":P.sub, fontWeight:700, fontSize:13, cursor:"pointer",
+            }}>{lbl}</button>
+          ))}
+        </div>
+      )}
 
       {/* Input mode toggle */}
       {step===1 && (
@@ -1536,8 +1670,21 @@ function MovementsScreen({ tools, checkouts, setCheckouts, setTools, sites, user
           </div>
           <Dropdown label="Assign to Foreman *" value={assignment.foremanId} onChange={v=>setA("foremanId",v)}
             options={users.filter(u=>u.role==="foreman").map(u=>({value:u.id,label:u.name}))} required />
-          <Dropdown label="Site *" value={assignment.siteId} onChange={v=>setA("siteId",v)}
-            options={sites.map(s=>({value:s.id,label:s.name}))} required />
+          <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
+            <div style={{ flex:1 }}>
+              <Dropdown label="Site *" value={assignment.siteId} onChange={v=>setA("siteId",v)}
+                options={sites.map(s=>({value:s.id,label:s.name}))} required />
+            </div>
+            {canManageSystem && (
+              <button className="tap" onClick={onManageSites} style={{ 
+                background:P.elevated, border:`1px solid ${P.border}`, borderRadius:10, 
+                padding:"10px 14px", height:41, marginBottom:14, cursor:"pointer",
+                display:"flex", alignItems:"center", gap:6, color:P.text, fontSize:13, fontWeight:600
+              }}>
+                <Settings size={14}/> Manage
+              </button>
+            )}
+          </div>
           <Field label="Due Back Date *" value={assignment.dueDate} onChange={v=>setA("dueDate",v)} type="date" required />
           <div style={{ marginBottom:14 }}>
             <div style={{ fontSize:12, color:P.sub, marginBottom:5, fontWeight:500 }}>Notes</div>
@@ -1558,7 +1705,8 @@ function MovementsScreen({ tools, checkouts, setCheckouts, setTools, sites, user
 // ─────────────────────────────────────────────────────────────────────────────
 // REPAIRS — QR scan, searchable picker, editable
 // ─────────────────────────────────────────────────────────────────────────────
-function RepairsScreen({ tools, repairs, setRepairs, setTools, canEdit }) {
+function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatus }) {
+  const { canLogRepair, canUpdateRepair } = useAuth();
   const [showAdd,    setShowAdd]    = useState(false);
   const [filter,     setFilter]     = useState("active");
   const [editRepair, setEditRepair] = useState(null);
@@ -1574,38 +1722,27 @@ function RepairsScreen({ tools, repairs, setRepairs, setTools, canEdit }) {
     if (tool) setForm(f=>({...f, toolId}));
   };
 
-  const addRepair = () => {
+  const addRepair = async () => {
     if (!form.toolId || !form.issue.trim()) { alert("Tool and issue are required"); return; }
-    const newRepair = { id:uid(), ...form, estimatedCost:Number(form.estimatedCost)||0, reportedBy:"u1", status:"pending", actualCost:null, notes:"" };
-    setRepairs(prev=>[...prev, newRepair]);
-    // Mark tool as in repair
-    setTools(prev=>prev.map(t=>t.id===form.toolId?{...t,status:"in_repair"}:t));
+    await onAddRepair(form);
     setShowAdd(false);
     setForm({ toolId:"", issue:"", assignedTo:"", estimatedReturn:"", estimatedCost:"" });
   };
 
-  const updateRepair = (updated) => {
-    setRepairs(prev=>prev.map(r=>r.id===updated.id?updated:r));
-    // If marked complete, set tool back to available
-    if (updated.status==="complete") {
-      setTools(prev=>prev.map(t=>t.id===updated.toolId?{...t,status:"available"}:t));
-    }
+  const updateRepair = async (updated) => {
+    await onUpdateRepair(updated);
     setEditRepair(null);
   };
 
-  const setStatus = (id, status) => {
-    setRepairs(prev=>prev.map(r=>r.id===id?{...r,status}:r));
-    if (status==="complete") {
-      const r = repairs.find(r=>r.id===id);
-      if (r) setTools(prev=>prev.map(t=>t.id===r.toolId?{...t,status:"available"}:t));
-    }
+  const setStatus = async (id, status) => {
+    await onSetStatus(id, status);
   };
 
   return (
     <div style={{ padding:16 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
         <div className="syne" style={{ fontSize:17, fontWeight:700, color:P.text }}>Repairs & Maintenance</div>
-        {canEdit && <Btn small onClick={()=>setShowAdd(true)}>+ Log Repair</Btn>}
+        {canLogRepair && <Btn small onClick={()=>setShowAdd(true)}>+ Log Repair</Btn>}
       </div>
 
       <div style={{ display:"flex", gap:7, marginBottom:14 }}>
@@ -1638,7 +1775,7 @@ function RepairsScreen({ tools, repairs, setRepairs, setTools, canEdit }) {
               <div style={{ fontSize:11, color:P.muted }}>Est. cost: <span style={{ color:P.sub, fontWeight:600 }}>{currency(r.estimatedCost)}</span></div>
               {r.actualCost!=null && <div style={{ fontSize:11, color:P.muted }}>Actual cost: <span style={{ color:P.red, fontWeight:700 }}>{currency(r.actualCost)}</span></div>}
             </div>
-            {canEdit && (
+            {canUpdateRepair && (
               <div style={{ display:"flex", gap:7, flexWrap:"wrap" }}>
                 <Btn small variant="secondary" onClick={()=>setEditRepair(r)}>
                   <Edit2 size={11} style={{ marginRight:4, display:"inline" }}/>Edit
@@ -1750,8 +1887,10 @@ function RepairEditModal({ repair, tools, onSave, onClose }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // REPORTS — expandable categories, PDF + Excel export
 // ─────────────────────────────────────────────────────────────────────────────
-function ReportsScreen({ tools, checkouts, repairs }) {
+function ReportsScreen({ tools, checkouts, repairs, onImportTools }) {
   const [expanded,    setExpanded]    = useState({});
+  const [importing,   setImporting]   = useState(false);
+  const fileInputRef = useRef(null);
 
   const totalValue  = tools.reduce((s,t)=>s+(t.cost||0),0);
   const repairCosts = repairs.reduce((s,r)=>s+(r.estimatedCost||0),0);
@@ -1768,7 +1907,93 @@ function ReportsScreen({ tools, checkouts, repairs }) {
 
   const toggleCat = cat => setExpanded(e=>({...e,[cat]:!e[cat]}));
 
-  const doExportCSV  = () => exportCSV(tools, repairs);
+  const parseCSV = (text) => {
+    const lines = text.split('\n').filter(l => l.trim());
+    if (lines.length === 0) return [];
+    const delimiter = (lines[0].split(';').length > lines[0].split(',').length) ? ';' : ',';
+    
+    const rows = []; let currentRow = []; let currentCell = ''; let inQuotes = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i], nextC = text[i+1];
+      if (c === '"' && inQuotes && nextC === '"') { currentCell += '"'; i++; }
+      else if (c === '"') { inQuotes = !inQuotes; }
+      else if (c === delimiter && !inQuotes) { currentRow.push(currentCell); currentCell = ''; }
+      else if (c === '\n' && !inQuotes) {
+        if (currentCell.endsWith('\r')) currentCell = currentCell.slice(0, -1);
+        currentRow.push(currentCell); rows.push(currentRow);
+        currentRow = []; currentCell = '';
+      } else { currentCell += c; }
+    }
+    if (currentCell || currentRow.length > 0) {
+      if (currentCell.endsWith('\r')) currentCell = currentCell.slice(0, -1);
+      currentRow.push(currentCell); rows.push(currentRow);
+    }
+    return rows;
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        let text = ev.target.result;
+        if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+        
+        const rows = parseCSV(text);
+        if (rows.length < 2) {
+          alert("File appears empty or invalid.");
+          return;
+        }
+        
+        const header = rows[0].map(h => String(h||"").trim());
+        if (header[1] !== "Name" || header[2] !== "Category") {
+          alert(`Invalid CSV format. Please use the exact template exported from the system.\n\nExpected Column 2: 'Name', Column 3: 'Category'.\nFound: '${header[1]}' and '${header[2]}'.`);
+          return;
+        }
+
+        setImporting(true);
+        const toolsToImport = [];
+        const statusMap = { "Available":"available", "Checked Out":"checked_out", "In Repair":"in_repair", "Retired":"retired" };
+        const condMap = { "Good":"good", "Fair":"fair", "Poor":"poor" };
+
+        for (let i = 1; i < rows.length; i++) {
+          const row = rows[i];
+          if (row.length < 3 || !String(row[1]).trim()) continue; // skip empty rows or rows without names
+          toolsToImport.push({
+            id: String(row[0]||"").trim() || null,
+            name: String(row[1]||"").trim(),
+            category: String(row[2]||"").trim(),
+            brand: String(row[3]??"").trim() || "",
+            model: String(row[4]??"").trim() || "",
+            serial: String(row[5]??"").trim() || "",
+            status: statusMap[String(row[6]??"").trim()] || "available",
+            condition: condMap[String(row[7]??"").trim()] || "good",
+            cost: Number(row[8]) || 0,
+            purchaseDate: String(row[9]??"").trim() || "",
+          });
+        }
+        
+        if (confirm(`Ready to import ${toolsToImport.length} tools. Proceed?`)) {
+          await onImportTools(toolsToImport);
+          alert("Import successful! The tools have been added to your register and assigned scannable QR codes.");
+        }
+      } catch (err) {
+        console.error("Import error:", err);
+        alert("An error occurred while importing: " + err.message);
+      } finally {
+        setImporting(false);
+        e.target.value = null; // Always clear so the same file can be clicked again
+      }
+    };
+    reader.readAsError = () => {
+      alert("Browser failed to read the file.");
+      e.target.value = null;
+    };
+    reader.readAsText(file);
+  };
+
+  const doExportCSV  = () => exportCSV(tools);
   const doExportPDF  = () => printToolList(tools, "DK Turf & Paving — Full Asset Register");
 
   return (
@@ -1776,6 +2001,16 @@ function ReportsScreen({ tools, checkouts, repairs }) {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
         <div className="syne" style={{ fontSize:17, fontWeight:700, color:P.text }}>Asset Report</div>
         <div style={{ display:"flex", gap:7 }}>
+          <input type="file" accept=".csv" ref={fileInputRef} style={{ display: "none" }} onChange={handleImport} />
+          {onImportTools && (
+            <button onClick={() => fileInputRef.current?.click()} className="tap" disabled={importing} style={{
+              background:P.elevated, border:`1px solid ${P.border}`, borderRadius:9,
+              padding:"7px 11px", cursor:importing?"not-allowed":"pointer", display:"flex", alignItems:"center", gap:5, opacity: importing ? 0.5 : 1
+            }}>
+              <ArrowUpDown size={13} color={P.sub}/>
+              <span style={{ fontSize:12, color:P.sub }}>{importing ? "Importing...":"Import CSV"}</span>
+            </button>
+          )}
           <button onClick={doExportCSV} className="tap" style={{
             background:P.elevated, border:`1px solid ${P.border}`, borderRadius:9,
             padding:"7px 11px", cursor:"pointer", display:"flex", alignItems:"center", gap:5,
@@ -1937,29 +2172,137 @@ function NotificationsPanel({ checkouts, repairs, tools, sites, users, onClose, 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TEAM (Admin Only)
+// ─────────────────────────────────────────────────────────────────────────────
+function TeamScreen({ users, onCreateUser, onUpdateUser, onRemoveUser }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const [editUser, setEditUser] = useState(null);
+  const [form, setForm] = useState({ name:"", email:"", password:"", role:"foreman" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleSave = async () => {
+    if (editUser) {
+      if (!form.name || !form.email) { setError("Name and username are required"); return; }
+      setLoading(true); setError(null);
+      try {
+        await onUpdateUser(editUser.id, { name: form.name.trim(), email: form.email.trim(), role: form.role, password: form.password });
+        setEditUser(null);
+        setForm({ name:"", email:"", password:"", role:"foreman" });
+      } catch(err) { setError(err.message); }
+      setLoading(false);
+    } else {
+      if (!form.name || !form.email || !form.password) { setError("Please fill all fields"); return; }
+      if (form.password.length < 6) { setError("Password must be at least 6 characters"); return; }
+      setLoading(true); setError(null);
+      try {
+        await onCreateUser(form);
+        setShowAdd(false);
+        setForm({ name:"", email:"", password:"", role:"foreman" });
+      } catch(err) {
+        setError(err.message);
+      }
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ padding:16 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 }}>
+        <div className="syne" style={{ fontSize:17, fontWeight:700, color:P.text }}>Team Management</div>
+        <Btn small onClick={()=>setShowAdd(true)}>+ Add User</Btn>
+      </div>
+
+      <div style={{ marginBottom:14 }}>
+        <SectionLabel>Current Users ({users.length})</SectionLabel>
+        {users.map(u => (
+          <div key={u.id} style={{ background:P.surface, border:`1px solid ${P.border}`, borderRadius:12, padding:"12px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:14 }}>
+            <div style={{ width:42, height:42, borderRadius:12, background:ROLE_CFG[u.role]?.color+"22", border:`1px solid ${ROLE_CFG[u.role]?.color}44`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+              <span style={{ fontWeight:800, fontSize:12, color:ROLE_CFG[u.role]?.color }}>{u.initials || "U"}</span>
+            </div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontSize:14, fontWeight:600, color:P.text }}>{u.name}</div>
+              <div style={{ fontSize:12, color:P.sub }}>{ROLE_CFG[u.role]?.label || u.role}</div>
+            </div>
+            {u.email && <div style={{ fontSize:11, color:P.muted }}>{u.email}</div>}
+            <button className="tap" onClick={() => {
+              setEditUser(u);
+              setForm({ name:u.name, email:u.email, password:u.password||"", role:u.role });
+            }} style={{ background:P.elevated, border:`1px solid ${P.border}`, borderRadius:10, padding:"8px", color:P.sub, cursor:"pointer" }}>
+              <Edit2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {(showAdd || editUser) && (
+        <Modal title={editUser ? "Edit User" : "Add New User"} onClose={()=>{setShowAdd(false); setEditUser(null);}}>
+          {error && <div style={{ background:P.red+"22", border:`1px solid ${P.red}`, borderRadius:10, padding:"10px 12px", color:P.red, fontSize:13, marginBottom:16 }}>{error}</div>}
+          <Field label="Full Name" value={form.name} onChange={v=>setForm(f=>({...f,name:v}))} placeholder="John Doe" required />
+          <Field label="Username or Email" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} type="text" placeholder="e.g. johndoe" required />
+          <Field label="Password" value={form.password} onChange={v=>setForm(f=>({...f,password:v}))} type={editUser && !editUser.password ? "text" : "password"} placeholder={editUser && !editUser.password ? "Old profile (recreate to change)" : "Min 6 characters"} disabled={editUser && !editUser.password} required={!editUser} />
+          <Dropdown label="Role" value={form.role} onChange={v=>setForm(f=>({...f,role:v}))} options={Object.entries(ROLE_CFG).filter(([k])=>k!=="unauthorized").map(([k,v])=>({value:k,label:v.label}))} />
+          
+          <div style={{ display:"flex", gap:9, justifyContent:"space-between", marginTop:14 }}>
+            <div>
+              {editUser && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if(confirm(`Remove ${editUser.name} from the team?`)) {
+                      setLoading(true);
+                      await onRemoveUser(editUser.id);
+                      setShowAdd(false); setEditUser(null);
+                      setLoading(false);
+                    }
+                  }}
+                  style={{ background:"transparent", border:"none", color:P.red, fontSize:13, fontWeight:600, cursor:"pointer", padding:"8px 0" }}
+                >
+                  Delete User
+                </button>
+              )}
+            </div>
+            <div style={{ display:"flex", gap:9 }}>
+              <Btn small variant="secondary" onClick={()=>{setShowAdd(false); setEditUser(null);}}>Cancel</Btn>
+              <Btn small onClick={handleSave} disabled={loading}>{loading ? "Saving..." : editUser ? "Save Changes" : "Create User"}</Btn>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ROOT APP
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
   useEffect(() => { injectStyles(); }, []);
 
-  const [user,        setUser]        = useState(null);
+  const { currentUser, userRole, canEdit } = useAuth();
+
   const [tab,         setTab]         = useState("dashboard");
   const [showNotif,   setShowNotif]   = useState(false);
   const [toolModal,   setToolModal]   = useState(null);
   const [navFilter,   setNavFilter]   = useState(null);
   const [deepLinkTool,setDeepLinkTool]= useState(null);
   const [showCatMgr,  setShowCatMgr]  = useState(false);
+  const [showSiteMgr, setShowSiteMgr] = useState(false);
 
-  const [tools,      setTools]      = useState(INIT_TOOLS);
-  const [checkouts,  setCheckouts]  = useState(INIT_CHECKOUTS);
-  const [repairs,    setRepairs]    = useState(INIT_REPAIRS);
-  const [categories, setCategories] = useState(INIT_CATS);
-  const [sites]                     = useState(INIT_SITES);
-  const [users]                     = useState(INIT_USERS);
+  const { tools, checkouts, repairs, categories, users, sites, loading, saveTool, importTools, removeTool, checkoutTools, checkinTools, logRepair, updateRepair, updateRepairStatus, saveCategories, createTeamMember, updateTeamMember, removeTeamMember, saveSite, removeSite } = useLiveTracking(currentUser?.uid);
 
-  if (!user) return <div id="dktt-root"><LoginScreen onLogin={setUser} /></div>;
+  if (!currentUser) return <div id="dktt-root"><LoginScreen /></div>;
+  if (loading) return <div id="dktt-root" style={{ background:P.bg, minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", color:P.muted }}>Loading Data...</div>;
 
-  const canEdit    = user.role==="admin" || user.role==="asset_controller";
+  const user = {
+    id: currentUser.uid,
+    name: currentUser.displayName || currentUser.email.split("@")[0],
+    role: ROLE_CFG[userRole] ? userRole : "unauthorized",
+    initials: (currentUser.displayName || currentUser.email.split("@")[0]).slice(0, 2).toUpperCase()
+  };
+
+  const isAdmin = userRole === "admin";
+
   const alertCount = checkouts.filter(c=>!c.returnDate&&isOverdue(c.dueDate)).length
                    + repairs.filter(r=>r.status!=="complete"&&r.estimatedReturn&&isOverdue(r.estimatedReturn)).length;
 
@@ -1977,29 +2320,41 @@ export default function App() {
 
   return (
     <div id="dktt-root" style={{ background:P.bg, minHeight:"100vh", maxWidth:480, margin:"0 auto", color:P.text, position:"relative" }}>
-      <TopBar user={user} notifCount={alertCount} onNotifClick={()=>setShowNotif(true)} onLogout={()=>{ setUser(null); setTab("dashboard"); }} />
+      <TopBar user={user} notifCount={alertCount} onNotifClick={()=>setShowNotif(true)} onLogout={async ()=>{ await signOut(auth); setTab("dashboard"); }} />
 
       <div style={{ paddingTop:58, paddingBottom:80, minHeight:"100vh" }}>
         {tab==="dashboard"  && <Dashboard tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} onNavigate={handleNavigate}/>}
         {tab==="tools"      && <ToolsScreen tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} canEdit={canEdit} onAdd={()=>setToolModal("add")} onEdit={t=>setToolModal(t)} initialStatusFilter={navFilter} deepLinkTool={deepLinkTool} categories={categories} onManageCategories={()=>setShowCatMgr(true)}/>}
-        {tab==="movements"  && <MovementsScreen tools={tools} checkouts={checkouts} setCheckouts={setCheckouts} setTools={setTools} sites={sites} users={users} canEdit={canEdit}/>}
-        {tab==="repairs"    && <RepairsScreen tools={tools} repairs={repairs} setRepairs={setRepairs} setTools={setTools} canEdit={canEdit}/>}
-        {tab==="reports"    && <ReportsScreen tools={tools} checkouts={checkouts} repairs={repairs}/>}
+        {tab==="movements"  && <MovementsScreen tools={tools} checkouts={checkouts} onCheckout={checkoutTools} onCheckin={checkinTools} sites={sites} users={users} canEdit={canEdit} onManageSites={()=>setShowSiteMgr(true)}/>}
+        {tab==="repairs"    && <RepairsScreen tools={tools} repairs={repairs} onAddRepair={(form) => logRepair({...form, reportedBy: user.id})} onUpdateRepair={updateRepair} onSetStatus={updateRepairStatus} canEdit={canEdit}/>}
+        {tab==="reports"    && <ReportsScreen tools={tools} checkouts={checkouts} repairs={repairs} onImportTools={importTools}/>}
+        {tab==="team"       && isAdmin && <TeamScreen users={users} onCreateUser={createTeamMember} onUpdateUser={updateTeamMember} onRemoveUser={removeTeamMember} />}
       </div>
 
-      <BottomNav active={tab} setActive={t=>{ setTab(t); setNavFilter(null); }} alertCount={alertCount}/>
+      <BottomNav active={tab} setActive={t=>{ setTab(t); setNavFilter(null); }} alertCount={alertCount} isAdmin={isAdmin}/>
 
       {toolModal && (
         <ToolFormModal
           tool={toolModal==="add"?null:toolModal}
           categories={categories}
-          onSave={data=>{
-            if (!data.id) setTools(prev=>[...prev,{...data,id:`T${String(Date.now()).slice(-4)}`,status:"available"}]);
-            else setTools(prev=>prev.map(t=>t.id===data.id?{...t,...data}:t));
+          onSave={async data => {
+            await saveTool(data);
             setToolModal(null);
           }}
-          onDelete={id=>{ setTools(prev=>prev.filter(t=>t.id!==id)); setToolModal(null); }}
+          onDelete={async id => { 
+            await removeTool(id);
+            setToolModal(null); 
+          }}
           onClose={()=>setToolModal(null)}
+        />
+      )}
+
+      {showSiteMgr && (
+        <ManageSitesModal
+          sites={sites}
+          onSave={async data => { await saveSite(data); setShowSiteMgr(false); }}
+          onDelete={async id => { await removeSite(id); }}
+          onClose={()=>setShowSiteMgr(false)}
         />
       )}
 
@@ -2007,21 +2362,8 @@ export default function App() {
         <ManageCategoriesModal
           categories={categories}
           tools={tools}
-          onSave={({cats, renames, deleted}) => {
-            let nextCats = [...cats];
-            if (deleted.length > 0 && !nextCats.includes("Uncategorized")) {
-              const needsUncat = tools.some(t => deleted.includes(t.category));
-              if (needsUncat) nextCats.push("Uncategorized");
-            }
-            setCategories(nextCats);
-            
-            if (Object.keys(renames).length > 0 || deleted.length > 0) {
-              setTools(prev => prev.map(t => {
-                if (deleted.includes(t.category)) return { ...t, category: "Uncategorized" };
-                if (renames[t.category]) return { ...t, category: renames[t.category] };
-                return t;
-              }));
-            }
+          onSave={async (data) => {
+            await saveCategories(data);
             setShowCatMgr(false);
           }}
           onClose={()=>setShowCatMgr(false)}
