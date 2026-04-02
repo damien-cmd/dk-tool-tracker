@@ -95,7 +95,11 @@ export function useLiveTracking(userId) {
   };
 
   const removeTool = async (id) => {
-    await deleteDoc(doc(db, "tools", id));
+    const batch = writeBatch(db);
+    batch.delete(doc(db, "tools", id));
+    checkouts.filter(c => c.toolId === id).forEach(c => batch.delete(doc(db, "checkouts", c.id)));
+    repairs.filter(r => r.toolId === id).forEach(r => batch.delete(doc(db, "repairs", r.id)));
+    await batch.commit();
   };
 
   const checkoutTools = async (toolsSelected, assignment) => {
