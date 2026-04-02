@@ -52,7 +52,7 @@ export function AuthProvider({ children }) {
       } else {
         setUserRole(null);
       }
-      setLoading(false);
+      setTimeout(() => setLoading(false), 0);
     });
 
     return unsubscribe;

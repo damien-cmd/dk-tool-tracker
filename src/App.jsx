@@ -60,7 +60,6 @@ const TODAY     = new Date("2026-03-18");
 const fmt       = d => new Date(d).toLocaleDateString("en-ZA", { day:"2-digit", month:"short", year:"numeric" });
 const isOverdue = d => d && new Date(d) < TODAY;
 const currency  = n => `R ${Number(n || 0).toLocaleString("en-ZA")}`;
-const uid       = () => `id_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
 
 const STATUS_CFG = {
   available:   { label:"Available",   color:P.green,  bg:"rgba(34,197,94,0.12)"   },
@@ -84,17 +83,6 @@ const REPAIR_STATUS_CFG = {
   in_progress: { label:"In Progress", color:P.orange },
   complete:    { label:"Complete",    color:P.green  },
 };
-
-// ─────────────────────────────────────────────────────────────────────────────
-// LOAD EXTERNAL LIBS
-// ─────────────────────────────────────────────────────────────────────────────
-const loadScript = (src, checkFn) => new Promise((res, rej) => {
-  if (checkFn()) return res();
-  const s = document.createElement("script");
-  s.src = src; s.onload = res; s.onerror = rej;
-  document.head.appendChild(s);
-});
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SELF-CONTAINED QR CODE GENERATOR
@@ -145,7 +133,7 @@ const buildQR = (() => {
   // 8 mask pattern functions
   const MK = [
     (r,c) => (r+c)%2===0,
-    (r,c) => r%2===0,
+    r => r%2===0,
     (r,c) => c%3===0,
     (r,c) => (r+c)%3===0,
     (r,c) => (Math.floor(r/2)+Math.floor(c/3))%2===0,
@@ -1044,7 +1032,7 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, onAdd, onEdit, i
   const [statusFilter, setStatusFilter] = useState(initialStatusFilter || "All");
   const [detail,       setDetail]       = useState(null);
 
-  useEffect(() => { if (initialStatusFilter) setStatusFilter(initialStatusFilter); }, [initialStatusFilter]);
+  useEffect(() => { if (initialStatusFilter) setTimeout(() => setStatusFilter(initialStatusFilter), 0); }, [initialStatusFilter]);
 
   const filtered = tools.filter(t => {
     const q = search.toLowerCase();
@@ -1149,7 +1137,7 @@ function ToolsScreen({ tools, checkouts, repairs, sites, users, onAdd, onEdit, i
                   {co && site && <div style={{ fontSize:11, color:P.orange, marginTop:4 }}>📍 {foreman?.name} → {site.name}</div>}
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:5, flexShrink:0 }}>
-                  <Badge label={COND_CFG[t.condition].label} color={COND_CFG[t.condition].color} />
+                  <Badge label={COND_CFG[t.condition]?.label || "Unknown"} color={COND_CFG[t.condition]?.color || P.muted} />
                   {canSeeFinancials && <div style={{ fontSize:11, color:P.muted }}>{currency(t.cost)}</div>}
                 </div>
               </div>
@@ -1209,7 +1197,7 @@ function ToolDetailModal({ tool, checkouts, repairs, sites, users, canEdit, onCl
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:9, marginBottom:14 }}>
         {[
           ["Status",     <Badge {...STATUS_CFG[tool.status]} />],
-          ["Condition",  <Badge label={COND_CFG[tool.condition].label} color={COND_CFG[tool.condition].color} />],
+          ["Condition",  <Badge label={COND_CFG[tool.condition]?.label || "Unknown"} color={COND_CFG[tool.condition]?.color || P.muted} />],
           ["Category",   tool.category],
           ["Brand",      tool.brand||"—"],
           ["Model",      tool.model||"—"],
@@ -1705,7 +1693,7 @@ function MovementsScreen({ tools, checkouts, onCheckout, onCheckin, sites, users
 // ─────────────────────────────────────────────────────────────────────────────
 // REPAIRS — QR scan, searchable picker, editable
 // ─────────────────────────────────────────────────────────────────────────────
-function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatus }) {
+function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatus, onRemoveRepair }) {
   const { canLogRepair, canUpdateRepair } = useAuth();
   const [showAdd,    setShowAdd]    = useState(false);
   const [filter,     setFilter]     = useState("active");
@@ -1758,7 +1746,7 @@ function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatu
       {displayed.map(r => {
         const tool  = tools.find(t=>t.id===r.toolId);
         const late  = r.status!=="complete" && isOverdue(r.estimatedReturn);
-        const scfg  = REPAIR_STATUS_CFG[r.status];
+        const scfg  = REPAIR_STATUS_CFG[r.status] || { label: r.status || "Unknown", color: P.muted, bg: P.surface };
         return (
           <div key={r.id} style={{ background:P.surface, border:`1px solid ${late?P.red+"44":P.border}`, borderRadius:13, padding:13, marginBottom:10 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
@@ -1835,7 +1823,7 @@ function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatu
 
       {/* Edit Repair Modal */}
       {editRepair && (
-        <RepairEditModal repair={editRepair} tools={tools} onSave={updateRepair} onClose={()=>setEditRepair(null)}/>
+        <RepairEditModal repair={editRepair} tools={tools} onSave={updateRepair} onDelete={onRemoveRepair} onClose={()=>setEditRepair(null)}/>
       )}
 
       {scanning && <QRScanner onScan={handleScan} onClose={()=>setScanning(false)} title="Scan Tool for Repair"/>}
@@ -1843,7 +1831,7 @@ function RepairsScreen({ tools, repairs, onAddRepair, onUpdateRepair, onSetStatu
   );
 }
 
-function RepairEditModal({ repair, tools, onSave, onClose }) {
+function RepairEditModal({ repair, tools, onSave, onDelete, onClose }) {
   const [form, setForm] = useState({ ...repair });
   const setF = (k,v) => setForm(f=>({...f,[k]:v}));
   const tool = tools.find(t=>t.id===repair.toolId);
@@ -1876,9 +1864,25 @@ function RepairEditModal({ repair, tools, onSave, onClose }) {
       </div>
       <Dropdown label="Status" value={form.status} onChange={v=>setF("status",v)}
         options={Object.entries(REPAIR_STATUS_CFG).map(([k,v])=>({value:k,label:v.label}))}/>
-      <div style={{ display:"flex", gap:9, justifyContent:"flex-end", marginTop:6 }}>
-        <Btn small variant="secondary" onClick={onClose}>Cancel</Btn>
-        <Btn small onClick={()=>onSave(form)}>Save Changes</Btn>
+      <div style={{ display:"flex", gap:9, justifyContent:"space-between", marginTop:6 }}>
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Are you sure you want to delete this repair record?")) {
+                onDelete(repair.id);
+                onClose();
+              }
+            }}
+            style={{ background:"transparent", border:"none", color:P.red, fontSize:13, fontWeight:600, cursor:"pointer", padding:"8px 0" }}
+          >
+            Delete Repair
+          </button>
+        </div>
+        <div style={{ display:"flex", gap:9 }}>
+          <Btn small variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn small onClick={()=>onSave(form)}>Save Changes</Btn>
+        </div>
       </div>
     </Modal>
   );
@@ -2064,7 +2068,7 @@ function ReportsScreen({ tools, checkouts, repairs, onImportTools }) {
 
       {/* Expandable category rows */}
       <SectionLabel>Category Breakdown — tap to expand tools</SectionLabel>
-      {byCat.map((c, i) => (
+      {byCat.map((c) => (
         <div key={c.fullName} style={{ marginBottom:8 }}>
           <button onClick={()=>toggleCat(c.fullName)} className="tap" style={{
             width:"100%", background:P.surface, border:`1px solid ${expanded[c.fullName]?P.orange:P.border}`,
@@ -2289,7 +2293,7 @@ export default function App() {
   const [showCatMgr,  setShowCatMgr]  = useState(false);
   const [showSiteMgr, setShowSiteMgr] = useState(false);
 
-  const { tools, checkouts, repairs, categories, users, sites, loading, saveTool, importTools, removeTool, checkoutTools, checkinTools, logRepair, updateRepair, updateRepairStatus, saveCategories, createTeamMember, updateTeamMember, removeTeamMember, saveSite, removeSite } = useLiveTracking(currentUser?.uid);
+  const { tools, checkouts, repairs, categories, users, sites, loading, saveTool, importTools, removeTool, checkoutTools, checkinTools, logRepair, updateRepair, updateRepairStatus, removeRepair, saveCategories, createTeamMember, updateTeamMember, removeTeamMember, saveSite, removeSite } = useLiveTracking(currentUser?.uid);
 
   if (!currentUser) return <div id="dktt-root"><LoginScreen /></div>;
   if (loading) return <div id="dktt-root" style={{ background:P.bg, minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", color:P.muted }}>Loading Data...</div>;
@@ -2326,7 +2330,7 @@ export default function App() {
         {tab==="dashboard"  && <Dashboard tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} onNavigate={handleNavigate}/>}
         {tab==="tools"      && <ToolsScreen tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} canEdit={canEdit} onAdd={()=>setToolModal("add")} onEdit={t=>setToolModal(t)} initialStatusFilter={navFilter} deepLinkTool={deepLinkTool} categories={categories} onManageCategories={()=>setShowCatMgr(true)}/>}
         {tab==="movements"  && <MovementsScreen tools={tools} checkouts={checkouts} onCheckout={checkoutTools} onCheckin={checkinTools} sites={sites} users={users} canEdit={canEdit} onManageSites={()=>setShowSiteMgr(true)}/>}
-        {tab==="repairs"    && <RepairsScreen tools={tools} repairs={repairs} onAddRepair={(form) => logRepair({...form, reportedBy: user.id})} onUpdateRepair={updateRepair} onSetStatus={updateRepairStatus} canEdit={canEdit}/>}
+        {tab==="repairs"    && <RepairsScreen tools={tools} repairs={repairs} onAddRepair={(form) => logRepair({...form, reportedBy: user.id})} onUpdateRepair={updateRepair} onSetStatus={updateRepairStatus} onRemoveRepair={removeRepair} canEdit={canEdit}/>}
         {tab==="reports"    && <ReportsScreen tools={tools} checkouts={checkouts} repairs={repairs} onImportTools={importTools}/>}
         {tab==="team"       && isAdmin && <TeamScreen users={users} onCreateUser={createTeamMember} onUpdateUser={updateTeamMember} onRemoveUser={removeTeamMember} />}
       </div>

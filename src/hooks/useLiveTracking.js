@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { collection, onSnapshot, doc, getDoc, setDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
+import { collection, onSnapshot, doc, setDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateEmail, updatePassword, deleteUser, signOut as signOutSecondary } from "firebase/auth";
 import { db, secondaryAuth } from "../firebase";
 
@@ -34,11 +34,11 @@ export function useLiveTracking(userId) {
     // CRITICAL: Await valid authentication token before syncing
     // ---------------------------------------------------------
     if (!userId) {
-      setLoading(false);
+      setTimeout(() => setLoading(false), 0);
       return;
     }
     
-    setLoading(true);
+    setTimeout(() => setLoading(true), 0);
     let unsubs = [];
     
     unsubs.push(onSnapshot(collection(db, "tools"), (snap) => {
@@ -147,6 +147,10 @@ export function useLiveTracking(userId) {
     await batch.commit();
   };
 
+  const removeRepair = async (id) => {
+    await deleteDoc(doc(db, "repairs", id));
+  };
+
   const saveCategories = async ({cats, renames, deleted}) => {
     let nextCats = [...cats];
     if (deleted.length > 0 && !nextCats.includes("Uncategorized")) {
@@ -250,5 +254,5 @@ export function useLiveTracking(userId) {
     await deleteDoc(doc(db, "sites", id));
   };
 
-  return { tools, checkouts, repairs, categories, users, sites, loading, saveTool, importTools, removeTool, checkoutTools, checkinTools, logRepair, updateRepair, updateRepairStatus, saveCategories, createTeamMember, updateTeamMember, removeTeamMember, saveSite, removeSite };
+  return { tools, checkouts, repairs, categories, users, sites, loading, saveTool, importTools, removeTool, checkoutTools, checkinTools, logRepair, updateRepair, updateRepairStatus, removeRepair, saveCategories, createTeamMember, updateTeamMember, removeTeamMember, saveSite, removeSite };
 }
