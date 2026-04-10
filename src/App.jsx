@@ -1274,8 +1274,27 @@ function ToolFormModal({ tool, onSave, onDelete, onClose, categories }) {
   const handlePhoto = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+    
     const reader = new FileReader();
-    reader.onload = ev => set("photo", ev.target.result);
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 600;
+        let { width, height } = img;
+        if (width > height) {
+          if (width > MAX) { height = height * (MAX / width); width = MAX; }
+        } else {
+          if (height > MAX) { width = width * (MAX / height); height = MAX; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        // Compress to JPEG for smaller dataURL payload
+        set("photo", canvas.toDataURL("image/jpeg", 0.7));
+      };
+      img.src = ev.target.result;
+    };
     reader.readAsDataURL(file);
   };
 
@@ -2342,8 +2361,12 @@ export default function App() {
           tool={toolModal==="add"?null:toolModal}
           categories={categories}
           onSave={async data => {
-            await saveTool(data);
-            setToolModal(null);
+            try {
+              await saveTool(data);
+              setToolModal(null);
+            } catch (err) {
+              alert("Failed to save tool: " + err.message);
+            }
           }}
           onDelete={async id => { 
             await removeTool(id);
