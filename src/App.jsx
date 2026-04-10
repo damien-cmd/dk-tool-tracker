@@ -12,6 +12,7 @@ import { signInWithEmailAndPassword, signOut } from "firebase/auth";
 import { auth } from "./firebase";
 import { useLiveTracking } from "./hooks/useLiveTracking";
 import jsQR from "jsqr";
+import QRCode from "qrcode";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
@@ -56,7 +57,7 @@ const P = {
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────────────────
-const TODAY     = new Date("2026-03-18");
+const TODAY     = new Date();
 const fmt       = d => new Date(d).toLocaleDateString("en-ZA", { day:"2-digit", month:"short", year:"numeric" });
 const isOverdue = d => d && new Date(d) < TODAY;
 const currency  = n => `R ${Number(n || 0).toLocaleString("en-ZA")}`;
@@ -85,233 +86,27 @@ const REPAIR_STATUS_CFG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SELF-CONTAINED QR CODE GENERATOR
-// Zero external dependencies — pure JS running entirely in the browser.
-// All codes encode "DKTP-{toolId}" making them unique to DK Turf & Paving.
-// Implements: Byte mode · ECC level M · Versions 1-4 · All 8 mask patterns
-// ─────────────────────────────────────────────────────────────────────────────
-const buildQR = (() => {
-  // GF(256) arithmetic (primitive polynomial 0x11D = x^8+x^4+x^3+x^2+1)
-  const EX = new Uint8Array(512), LG = new Uint8Array(256);
-  for (let i = 0, x = 1; i < 255; i++, x = (x << 1) ^ (x & 128 ? 0x11D : 0)) {
-    EX[i] = x; LG[x] = i;
-  }
-  for (let i = 255; i < 512; i++) EX[i] = EX[i - 255];
-  const gm = (a, b) => (a && b) ? EX[LG[a] + LG[b]] : 0;
-
-  // Reed-Solomon: generator polynomial for n EC codewords
-  const makeGen = n => {
-    let p = [1];
-    for (let i = 0; i < n; i++) {
-      const q = new Array(p.length + 1).fill(0);
-      for (let j = 0; j < p.length; j++) { q[j] ^= p[j]; q[j+1] ^= gm(p[j], EX[i]); }
-      p = q;
-    }
-    return p;
-  };
-
-  // Reed-Solomon encode
-  const rsEncode = (data, n) => {
-    const g = makeGen(n), r = new Array(n).fill(0);
-    for (const b of data) {
-      const lead = b ^ r.shift(); r.push(0);
-      if (lead) for (let i = 0; i < g.length - 1; i++) r[i] ^= gm(g[i], lead);
-    }
-    return r;
-  };
-
-  // ECC-M version params: [dataCW, ecCW, remainderBits]
-  const VP = { 1:[16,10,0], 2:[28,16,7], 3:[44,26,7], 4:[64,36,7] };
-
-  // Format information strings for ECC-M masks 0-7
-  // (15-bit BCH-encoded format word, XORed with mask 0x5412)
-  const FM = [21522, 20773, 24188, 23371, 17913, 16590, 20375, 19104];
-
-  // Single alignment pattern center per version (pre-filtered, no finder overlap)
-  const AC = { 2:[[18,18]], 3:[[22,22]], 4:[[26,26]] };
-
-  // 8 mask pattern functions
-  const MK = [
-    (r,c) => (r+c)%2===0,
-    r => r%2===0,
-    (r,c) => c%3===0,
-    (r,c) => (r+c)%3===0,
-    (r,c) => (Math.floor(r/2)+Math.floor(c/3))%2===0,
-    (r,c) => (r*c%2+r*c%3)===0,
-    (r,c) => (r*c%2+r*c%3)%2===0,
-    (r,c) => ((r+c)%2+r*c%3)%2===0,
-  ];
-
-  // Penalty score for mask selection
-  const calcPenalty = (mat, sz) => {
-    let s = 0;
-    // Rule 1: runs of 5+
-    const runP = arr => {
-      let run = 1, prev = arr[0];
-      for (let i = 1; i < arr.length; i++) {
-        if (arr[i] === prev) run++;
-        else { if (run >= 5) s += run - 2; run = 1; prev = arr[i]; }
-      }
-      if (run >= 5) s += run - 2;
-    };
-    for (let r = 0; r < sz; r++) runP(mat[r]);
-    for (let c = 0; c < sz; c++) runP(mat.map(row => row[c]));
-    // Rule 2: 2×2 blocks
-    for (let r = 0; r < sz-1; r++)
-      for (let c = 0; c < sz-1; c++)
-        if (mat[r][c]===mat[r][c+1] && mat[r][c]===mat[r+1][c] && mat[r][c]===mat[r+1][c+1]) s += 3;
-    // Rule 4: dark ratio
-    const dark = mat.flat().reduce((a, v) => a + v, 0);
-    s += Math.floor(Math.abs(dark / (sz * sz) * 100 - 50) / 5) * 10;
-    return s;
-  };
-
-  return function buildQR(text) {
-    const bytes = [...text].map(c => c.charCodeAt(0));
-    const n = bytes.length;
-    const v = n <= 14 ? 1 : n <= 26 ? 2 : n <= 42 ? 3 : 4;
-    const sz = 17 + 4 * v;
-    const [dCW, eCW, rem] = VP[v];
-
-    // ── 1. Build data bit stream ──────────────────────────────────────────
-    const bits = [];
-    const push = (val, len) => { for (let i = len-1; i >= 0; i--) bits.push((val >> i) & 1); };
-    push(4, 4);        // byte mode indicator
-    push(n, 8);        // character count
-    bytes.forEach(b => push(b, 8));
-    for (let i = 0; i < 4 && bits.length < dCW*8; i++) bits.push(0); // terminator
-    while (bits.length % 8) bits.push(0);                              // byte-align
-    const pad = [0xEC, 0x11]; let pi = 0;
-    while (bits.length < dCW * 8) push(pad[pi++ % 2], 8);             // pad codewords
-
-    const dw = [];
-    for (let i = 0; i < dCW; i++) {
-      let val = 0;
-      for (let j = 0; j < 8; j++) val = (val << 1) | bits[i*8+j];
-      dw.push(val);
-    }
-    const ew = rsEncode(dw, eCW);
-    const db = [];
-    [...dw, ...ew].forEach(w => { for (let i = 7; i >= 0; i--) db.push((w >> i) & 1); });
-    for (let i = 0; i < rem; i++) db.push(0);
-
-    // ── 2. Build matrix ──────────────────────────────────────────────────
-    const mat = Array.from({length:sz}, () => new Array(sz).fill(0));
-    const fn  = Array.from({length:sz}, () => new Array(sz).fill(false));
-    const sf = (r, c, val) => {
-      if (r >= 0 && r < sz && c >= 0 && c < sz) { mat[r][c] = val; fn[r][c] = true; }
-    };
-
-    // Finder patterns (7×7) + separators
-    const addFinder = (tr, tc) => {
-      for (let r = 0; r < 7; r++)
-        for (let c = 0; c < 7; c++)
-          sf(tr+r, tc+c, (r===0||r===6||c===0||c===6||(r>=2&&r<=4&&c>=2&&c<=4)) ? 1 : 0);
-      for (let i = -1; i <= 7; i++) {
-        sf(tr-1, tc+i, 0); sf(tr+7, tc+i, 0);
-        sf(tr+i, tc-1, 0); sf(tr+i, tc+7, 0);
-      }
-    };
-    addFinder(0, 0); addFinder(0, sz-7); addFinder(sz-7, 0);
-
-    // Timing patterns (row 6, col 6)
-    for (let i = 8; i < sz-8; i++) { sf(6, i, i%2===0?1:0); sf(i, 6, i%2===0?1:0); }
-
-    // Dark module
-    sf(4*v+9, 8, 1);
-
-    // Alignment patterns
-    (AC[v] || []).forEach(([ar, ac]) => {
-      for (let r = -2; r <= 2; r++)
-        for (let c = -2; c <= 2; c++)
-          if (!fn[ar+r][ac+c])
-            sf(ar+r, ac+c, (Math.abs(r)===2||Math.abs(c)===2||(r===0&&c===0)) ? 1 : 0);
-    });
-
-    // Reserve format info areas (mark as function so data doesn't overwrite)
-    for (let c = 0; c <= 8; c++) { if (!fn[8][c]) fn[8][c] = true; }
-    for (let r = 0; r <= 8; r++) { if (!fn[r][8]) fn[r][8] = true; }
-    for (let r = sz-8; r < sz; r++) { if (!fn[r][8]) fn[r][8] = true; }
-    for (let c = sz-8; c < sz; c++) { if (!fn[8][c]) fn[8][c] = true; }
-
-    // ── 3. Place data bits (zigzag) ───────────────────────────────────────
-    let bi = 0, up = true, col = sz - 1;
-    while (col >= 0) {
-      if (col === 6) { col--; continue; }
-      for (let ri = 0; ri < sz; ri++) {
-        const r = up ? sz-1-ri : ri;
-        for (const c of [col, col-1]) {
-          if (c >= 0 && !fn[r][c]) { mat[r][c] = bi < db.length ? db[bi++] : 0; }
-        }
-      }
-      up = !up; col -= 2;
-    }
-
-    // ── 4. Try all 8 masks, pick lowest penalty ───────────────────────────
-    let best = null, bestP = Infinity;
-    for (let m = 0; m < 8; m++) {
-      const mm = mat.map(row => [...row]);
-      // Apply mask to data modules only
-      for (let r = 0; r < sz; r++)
-        for (let c = 0; c < sz; c++)
-          if (!fn[r][c] && MK[m](r, c)) mm[r][c] ^= 1;
-
-      // Write format information (both copies)
-      const fv = FM[m], bit = i => (fv >> i) & 1;
-      // Copy 1: around top-left finder
-      for (let c = 0; c <= 5; c++) mm[8][c] = bit(14 - c);
-      mm[8][7] = bit(8); mm[8][8] = bit(7); mm[7][8] = bit(6);
-      for (let r = 5; r >= 0; r--) mm[r][8] = bit(r);
-      // Copy 2: bottom-left col and top-right row
-      for (let k = 0; k <= 6; k++) mm[sz-1-k][8] = bit(14 - k);
-      for (let j = 0; j <= 7; j++) mm[8][sz-8+j] = bit(7 - j);
-
-      const p = calcPenalty(mm, sz);
-      if (p < bestP) { bestP = p; best = mm; }
-    }
-    return best;
-  };
-})();
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QR CODE DISPLAY — canvas-based, zero network requests, always works
+// QR CODE DISPLAY — uses qrcode npm package (spec-compliant, scans on all cameras)
 // ─────────────────────────────────────────────────────────────────────────────
 function QRCodeDisplay({ toolId, size = 160 }) {
   const canvasRef = useRef(null);
-  const [done, setDone] = useState(false);
   const data = `DKTP-${toolId}`;
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    try {
-      const matrix = buildQR(data);
-      const sz     = matrix.length;
-      const quiet  = 4; // quiet zone modules on each side (QR spec minimum)
-      const total  = sz + quiet * 2;
-      const mod    = Math.max(2, Math.floor(size / total));
-      const px     = mod * total;
-      canvas.width  = px;
-      canvas.height = px;
-      const ctx = canvas.getContext("2d");
-      // White quiet zone background
-      ctx.fillStyle = "#FFFFFF";
-      ctx.fillRect(0, 0, px, px);
-      // Orange dark modules
-      ctx.fillStyle = "#F97316";
-      for (let r = 0; r < sz; r++)
-        for (let c = 0; c < sz; c++)
-          if (matrix[r][c] === 1)
-            ctx.fillRect((quiet + c) * mod, (quiet + r) * mod, mod, mod);
-      setDone(true);
-    } catch (e) { console.error("QR render error", e); }
+    QRCode.toCanvas(canvas, data, {
+      width: size,
+      margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+      errorCorrectionLevel: "M",
+    }).catch(e => console.error("QR render error", e));
   }, [data, size]);
 
   return (
     <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
       <div style={{ background:"#fff", borderRadius:10, padding:6, display:"inline-block", border:`2px solid ${P.orange}44` }}>
         <canvas ref={canvasRef} style={{ display:"block", borderRadius:6 }} />
-        {!done && <div style={{ fontSize:10, color:P.muted, padding:8 }}>Generating…</div>}
       </div>
       <div style={{ fontSize:11, color:P.sub, marginTop:6, fontFamily:"monospace" }}>{data}</div>
       <div style={{ fontSize:10, color:P.muted, marginTop:2 }}>Print & stick to tool · Scannable now</div>
@@ -319,18 +114,63 @@ function QRCodeDisplay({ toolId, size = 160 }) {
   );
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
-// QR SCANNER (Raw WebRTC + jsQR) - Zero-latency native camera engine
+// QR SCANNER — BarcodeDetector (native, HW-accelerated) with jsQR fallback.
+// Fixes: muted/autoPlay/playsInline on <video>, canvas sized once in
+// loadedmetadata, scan loop starts only after video dims are non-zero,
+// onScan stored in ref so effect never restarts on parent re-renders.
 // ─────────────────────────────────────────────────────────────────────────────
 function QRScanner({ onScan, onClose, title = "Scan QR Code" }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const videoRef   = useRef(null);
+  const canvasRef  = useRef(null);
   const requestRef = useRef(null);
-  const [error, setError] = useState(null);
+  const onScanRef  = useRef(onScan);
+  const [error, setError]   = useState(null);
+  const [engine, setEngine] = useState(null); // "native" | "jsqr"
+
+  useEffect(() => { onScanRef.current = onScan; }, [onScan]);
 
   useEffect(() => {
-    let stream = null;
+    let stream  = null;
     let mounted = true;
+
+    function scanNative() {
+      const detector = new window.BarcodeDetector({ formats: ["qr_code"] });
+      async function detect() {
+        if (!mounted || !videoRef.current) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes.length > 0 && codes[0].rawValue) {
+            onScanRef.current(codes[0].rawValue.replace("DKTP-", "").trim());
+            return;
+          }
+        } catch (_) { /* ignore per-frame detection errors */ }
+        requestRef.current = requestAnimationFrame(detect);
+      }
+      requestRef.current = requestAnimationFrame(detect);
+    }
+
+    function scanJsQR(canvas) {
+      const ctx  = canvas.getContext("2d", { willReadFrequently: true });
+      const size = canvas.width;
+      function frame() {
+        if (!mounted || !videoRef.current) return;
+        const video = videoRef.current;
+        const vW = video.videoWidth, vH = video.videoHeight;
+        if (!vW || !vH) { requestRef.current = requestAnimationFrame(frame); return; }
+        const minDim = Math.min(vW, vH);
+        ctx.drawImage(video, (vW - minDim) / 2, (vH - minDim) / 2, minDim, minDim, 0, 0, size, size);
+        const imageData = ctx.getImageData(0, 0, size, size);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
+        if (code && code.data) {
+          onScanRef.current(code.data.replace("DKTP-", "").trim());
+          return;
+        }
+        requestRef.current = requestAnimationFrame(frame);
+      }
+      requestRef.current = requestAnimationFrame(frame);
+    }
 
     async function startCamera() {
       try {
@@ -338,45 +178,27 @@ function QRScanner({ onScan, onClose, title = "Scan QR Code" }) {
           video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } }
         });
         if (!mounted || !videoRef.current) return;
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", true);
-        await videoRef.current.play();
-        scanFrame();
+        const video = videoRef.current;
+        video.srcObject = stream;
+
+        // Size canvas once when video dimensions are known, then pick engine
+        video.addEventListener("loadedmetadata", () => {
+          if (!mounted) return;
+          const canvas = canvasRef.current;
+          if (canvas) { canvas.width = 400; canvas.height = 400; }
+          if ("BarcodeDetector" in window) {
+            setEngine("native");
+            scanNative();
+          } else {
+            setEngine("jsqr");
+            scanJsQR(canvas);
+          }
+        }, { once: true });
+
+        await video.play();
       } catch (err) {
         if (mounted) setError("Camera access denied or unavailable: " + err.message);
       }
-    }
-
-    function scanFrame() {
-      if (!mounted || !videoRef.current || !canvasRef.current) return;
-      if (videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
-        const canvas = canvasRef.current;
-        const video = videoRef.current;
-        
-        // Define optimal processing size to obliterate high-res noise 
-        const size = 400;
-        canvas.width = size;
-        canvas.height = size;
-        const ctx = canvas.getContext("2d", { willReadFrequently: true });
-        
-        // Center crop the video feed to match the exact middle of the screen (where the UI target is)
-        const vW = video.videoWidth;
-        const vH = video.videoHeight;
-        const minDim = Math.min(vW, vH);
-        const sx = (vW - minDim) / 2;
-        const sy = (vH - minDim) / 2;
-        
-        ctx.drawImage(video, sx, sy, minDim, minDim, 0, 0, size, size);
-        const imageData = ctx.getImageData(0, 0, size, size);
-        
-        // Force jsQR to aggressively hunt for inverted matrix markers
-        const code = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "attemptBoth" });
-        if (code && code.data) {
-          onScan(code.data.replace("DKTP-", "").trim());
-          return; // Terminate scan loop on success
-        }
-      }
-      requestRef.current = requestAnimationFrame(scanFrame);
     }
 
     startCamera();
@@ -386,20 +208,25 @@ function QRScanner({ onScan, onClose, title = "Scan QR Code" }) {
       if (requestRef.current) cancelAnimationFrame(requestRef.current);
       if (stream) stream.getTracks().forEach(t => t.stop());
     };
-  }, [onScan]);
+  }, []); // empty — onScan accessed via ref, camera starts once
 
   return (
     <Modal title={title} onClose={onClose}>
       <div style={{ textAlign:"center" }}>
-        <div style={{ fontSize:13, color:P.sub, marginBottom:16, padding:"0 20px" }}>
-          Point your camera at a equipment label or generic QR code.
+        <div style={{ fontSize:13, color:P.sub, marginBottom:8, padding:"0 20px" }}>
+          Point your camera at an equipment label or generic QR code.
         </div>
+        {engine && (
+          <div style={{ fontSize:10, color: engine==="native" ? P.green : P.muted, marginBottom:8 }}>
+            {engine==="native" ? "✓ Native scanner active" : "jsQR fallback active"}
+          </div>
+        )}
         <div style={{ position:"relative", width:"100%", maxWidth:400, margin:"0 auto", minHeight: 300, borderRadius:12, overflow:"hidden", border:`1px solid ${P.border}`, background:"#000" }}>
           {error ? (
             <div style={{ color: P.red, padding: 20 }}>{error}</div>
           ) : (
             <>
-              <video ref={videoRef} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <video ref={videoRef} muted autoPlay playsInline style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
               <canvas ref={canvasRef} style={{ display: "none" }} />
               {/* Hardware-style Viewfinder Overlay */}
               <div style={{ position:"absolute", top:"20%", bottom:"20%", left:"15%", right:"15%", border:`3px solid ${P.orange}`, borderRadius:12, pointerEvents:"none", boxShadow:"0 0 0 4000px rgba(0,0,0,0.6)" }}></div>
@@ -441,37 +268,30 @@ function Lightbox({ onClose, children }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// QR DATA-URL HELPER — renders QR to offscreen canvas, returns PNG data URL
+// QR DATA-URL HELPER — async, uses qrcode package (spec-compliant output)
 // ─────────────────────────────────────────────────────────────────────────────
-function getQRDataURL(toolId, px = 200) {
-  const canvas = document.createElement("canvas");
+async function getQRDataURL(toolId, px = 200) {
   try {
-    const matrix = buildQR("DKTP-" + toolId);
-    const sz = matrix.length;
-    const quiet = 4;
-    const total = sz + quiet * 2;
-    const mod = Math.max(2, Math.floor(px / total));
-    const size = mod * total;
-    canvas.width = size; canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, size, size);
-    ctx.fillStyle = "#000000";
-    for (let r = 0; r < sz; r++)
-      for (let c = 0; c < sz; c++)
-        if (matrix[r][c] === 1)
-          ctx.fillRect((quiet + c) * mod, (quiet + r) * mod, mod, mod);
-    return canvas.toDataURL("image/png");
-  } catch(e) { return ""; }
+    return await QRCode.toDataURL("DKTP-" + toolId, {
+      width: px,
+      margin: 2,
+      color: { dark: "#000000", light: "#ffffff" },
+      errorCorrectionLevel: "M",
+    });
+  } catch { return ""; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRINT TOOL LIST — opens print window with photo + details + QR per row
+// window.open called before first await so popup-blockers don't interfere
 // ─────────────────────────────────────────────────────────────────────────────
-function printToolList(filteredTools, title) {
+async function printToolList(filteredTools, title) {
   title = title || "DK Turf & Paving — Tool Register";
+  const w = window.open("", "_blank");
+  if (!w) { alert("Pop-up blocked — please allow pop-ups for this page and try again."); return; }
   const date = new Date().toLocaleDateString("en-ZA");
-  const rows = filteredTools.map(function(t) {
-    const qr = getQRDataURL(t.id, 80);
+  const rows = await Promise.all(filteredTools.map(async function(t) {
+    const qr = await getQRDataURL(t.id, 80);
     const statusLabel = {available:"Available",checked_out:"Checked Out",in_repair:"In Repair",retired:"Retired"}[t.status] || t.status;
     const condLabel   = {good:"Good",fair:"Fair",poor:"Poor"}[t.condition] || t.condition;
     const statusColor = {available:"#16a34a",checked_out:"#ea580c",in_repair:"#dc2626",retired:"#6b7280"}[t.status] || "#333";
@@ -486,7 +306,7 @@ function printToolList(filteredTools, title) {
       "<td>" + condLabel + "</td>" +
       "<td style=\"text-align:right\">R " + Number(t.cost||0).toLocaleString("en-ZA") + "</td>" +
       "<td style=\"text-align:center\"><img src=\"" + qr + "\" width=\"56\" height=\"56\"/><br/><small style=\"font-size:8px;font-family:monospace\">DKTP-" + t.id + "</small></td></tr>";
-  }).join("");
+  }));
   const total = filteredTools.reduce(function(s,t){return s+(t.cost||0);},0);
   const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/><title>" + title + "</title>" +
     "<style>body{font-family:Arial,sans-serif;font-size:11px;color:#111;margin:20px}" +
@@ -500,11 +320,9 @@ function printToolList(filteredTools, title) {
     "<h1>" + title + "</h1>" +
     "<div class=\"meta\">Generated: " + date + " &nbsp;|&nbsp; " + filteredTools.length + " tools &nbsp;|&nbsp; Total value: R " + Number(total).toLocaleString("en-ZA") + "</div>" +
     "<table><thead><tr><th>Photo</th><th>Tool</th><th>Category</th><th>Serial No.</th><th>Status</th><th>Condition</th><th>Cost</th><th>QR Code</th></tr></thead>" +
-    "<tbody>" + rows + "</tbody></table>" +
+    "<tbody>" + rows.join("") + "</tbody></table>" +
     "<div class=\"total\">Total asset value: R " + Number(total).toLocaleString("en-ZA") + "</div>" +
     "</body></html>";
-  const w = window.open("", "_blank");
-  if (!w) { alert("Pop-up blocked — please allow pop-ups for this page and try again."); return; }
   w.document.write(html);
   w.document.close();
   setTimeout(function(){ w.focus(); w.print(); }, 700);
@@ -512,28 +330,30 @@ function printToolList(filteredTools, title) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PRINT QR LABEL SHEET — L45UPB: 5 cols × 9 rows, 39.2 × 29.88mm per label
+// QR size bumped to 25mm (was 20mm) for easier scanning. window.open before
+// first await so popup-blockers don't interfere.
 // ─────────────────────────────────────────────────────────────────────────────
-function printQRLabels(filteredTools) {
-  const cells = filteredTools.map(function(t) {
-    const qr   = getQRDataURL(t.id, 180);
+async function printQRLabels(filteredTools) {
+  const w = window.open("", "_blank");
+  if (!w) { alert("Pop-up blocked — please allow pop-ups for this page and try again."); return; }
+  const cells = await Promise.all(filteredTools.map(async function(t) {
+    const qr   = await getQRDataURL(t.id, 200);
     const name = t.name.length > 22 ? t.name.slice(0,20) + "…" : t.name;
     return "<div class=\"label\">" +
       "<img src=\"" + qr + "\" class=\"qrimg\"/>" +
       "<div class=\"toolid\">DKTP-" + t.id + "</div>" +
       "<div class=\"toolname\">" + name + "</div>" +
       "</div>";
-  }).join("");
+  }));
   const html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"/><title>DK Tool QR Labels</title>" +
     "<style>*{box-sizing:border-box;margin:0;padding:0}body{background:white;font-family:Arial,sans-serif}" +
     ".sheet{width:210mm;padding-top:13.54mm;padding-left:7mm;display:flex;flex-wrap:wrap}" +
     ".label{width:39.2mm;height:29.88mm;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0.8mm;overflow:hidden;padding:1mm}" +
-    ".qrimg{width:20mm;height:20mm;display:block}" +
+    ".qrimg{width:25mm;height:25mm;display:block}" +
     ".toolid{font-size:5.5pt;font-family:monospace;color:#333;line-height:1}" +
     ".toolname{font-size:5pt;color:#555;text-align:center;line-height:1.2;max-width:37mm;overflow:hidden}" +
     "@media print{@page{size:A4;margin:0}body{margin:0}}</style></head><body>" +
-    "<div class=\"sheet\">" + cells + "</div></body></html>";
-  const w = window.open("", "_blank");
-  if (!w) { alert("Pop-up blocked — please allow pop-ups for this page and try again."); return; }
+    "<div class=\"sheet\">" + cells.join("") + "</div></body></html>";
   w.document.write(html);
   w.document.close();
   setTimeout(function(){ w.focus(); w.print(); }, 700);
@@ -914,7 +734,7 @@ function BottomNav({ active, setActive, alertCount, isAdmin }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // DASHBOARD — stat cards navigate on tap
 // ─────────────────────────────────────────────────────────────────────────────
-function Dashboard({ tools, checkouts, repairs, sites, users, onNavigate }) {
+function Dashboard({ tools, checkouts, sites, users, onNavigate }) {
   const { canSeeFinancials } = useAuth();
   const available  = tools.filter(t=>t.status==="available").length;
   const checkedOut = tools.filter(t=>t.status==="checked_out").length;
@@ -1520,7 +1340,7 @@ function MovementsScreen({ tools, checkouts, onCheckout, onCheckin, sites, users
       {/* Input mode toggle */}
       {step===1 && (
         <div style={{ display:"flex", background:P.surface, borderRadius:10, padding:3, marginBottom:14, border:`1px solid ${P.border}` }}>
-          {[["scan","Scan QR","QrCode"],["manual","Manual List","List"]].map(([m,lbl,icon])=>(
+          {[["scan","Scan QR"],["manual","Manual List"]].map(([m,lbl])=>(
             <button key={m} onClick={()=>{ setInputMode(m); setScanError(null); setScanSearch(""); }} className="tap" style={{
               flex:1, padding:"8px", borderRadius:8, border:"none",
               background:inputMode===m?P.elevated:"transparent",
@@ -2346,7 +2166,7 @@ export default function App() {
       <TopBar user={user} notifCount={alertCount} onNotifClick={()=>setShowNotif(true)} onLogout={async ()=>{ await signOut(auth); setTab("dashboard"); }} />
 
       <div style={{ paddingTop:58, paddingBottom:80, minHeight:"100vh" }}>
-        {tab==="dashboard"  && <Dashboard tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} onNavigate={handleNavigate}/>}
+        {tab==="dashboard"  && <Dashboard tools={tools} checkouts={checkouts} sites={sites} users={users} onNavigate={handleNavigate}/>}
         {tab==="tools"      && <ToolsScreen tools={tools} checkouts={checkouts} repairs={repairs} sites={sites} users={users} canEdit={canEdit} onAdd={()=>setToolModal("add")} onEdit={t=>setToolModal(t)} initialStatusFilter={navFilter} deepLinkTool={deepLinkTool} categories={categories} onManageCategories={()=>setShowCatMgr(true)}/>}
         {tab==="movements"  && <MovementsScreen tools={tools} checkouts={checkouts} onCheckout={checkoutTools} onCheckin={checkinTools} sites={sites} users={users} canEdit={canEdit} onManageSites={()=>setShowSiteMgr(true)}/>}
         {tab==="repairs"    && <RepairsScreen tools={tools} repairs={repairs} onAddRepair={(form) => logRepair({...form, reportedBy: user.id})} onUpdateRepair={updateRepair} onSetStatus={updateRepairStatus} onRemoveRepair={removeRepair} canEdit={canEdit}/>}
